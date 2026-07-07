@@ -1,0 +1,255 @@
+// Prisma schema for the Auto Pal backend.
+// Mirrors the Flutter app's Hive models 1:1 so the mobile client can sync its
+// local data to the server without reshaping any payloads.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Reminder trigger — mirrors the app's TriggerType enum.
+enum TriggerType {
+  days
+  mileage
+}
+
+// Document category — mirrors the app's DocumentType enum.
+enum DocumentType {
+  driversLicense
+  revenueLicense
+  insurance
+  registration
+  emissionTest
+  other
+}
+
+// A registered account. Also carries the profile fields the app keeps in
+// UserProfileModel (displayName / phoneNumber / profileImage).
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  // Null for accounts created via Google Sign-In (no local password).
+  passwordHash    String?
+  // Google subject id, set when the account is linked to Google.
+  googleId        String?  @unique
+  displayName     String
+  phoneNumber     String?
+  // Client-facing download URL of the avatar, and its physical path on disk.
+  profileImageUrl String?
+  profileImagePath String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  preferences    UserPreferences?
+  vehicles       Vehicle[]
+  fuelRecords    FuelRecord[]
+  serviceRecords ServiceRecord[]
+  reminders      Reminder[]
+  documents      Document[]
+  driverLicense  DriverLicense?
+  tombstones     Tombstone[]
+
+  @@map("users")
+}
+
+// Records a deletion so offline clients can learn about server-side deletes
+// during sync. One row per (user, entityType, entityId); re-deleting refreshes
+// deletedAt. Deleting a vehicle emits a single vehicle tombstone — the client
+// cascades the removal to that vehicle's local children.
+model Tombstone {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // vehicle | tracker | fuelRecord | serviceRecord | reminder | document | driverLicense
+  entityType String
+  entityId   String
+  deletedAt  DateTime @default(now())
+
+  @@unique([userId, entityType, entityId])
+  @@index([userId, deletedAt])
+  @@map("tombstones")
+}
+
+// Per-user app settings (units, currency, backup preferences).
+model UserPreferences {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  distanceUnit      String   @default("km") // km | mi
+  fuelVolumeUnit    String   @default("liter") // liter | gallon
+  currency          String   @default("LKR")
+  autoBackupEnabled Boolean  @default(false)
+  backupFrequency   String   @default("weekly") // daily | weekly | monthly | off
+  lastBackupAt      DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("user_preferences")
+}
+
+// A vehicle in the user's garage. Field set mirrors VehicleModel exactly.
+model Vehicle {
+  id                  String   @id @default(uuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Powertrain: petrol | diesel | electric | hybrid | plugin_hybrid
+  type                String
+  // Category: car | van | bike | truck | suv
+  vehicleType         String
+  make                String
+  model               String
+  year                Int
+  licensePlate        String
+  currentMileage      Float
+  colour              String?
+  nickname            String?
+  nextServiceMileage  Float?
+  lastServiceMileage  Float?
+  serviceStation      String?
+  batteryVoltage      Float?
+  engineOilPercentage Float?
+  gearOilStatus       String?
+  tirePressurePsi     Float?
+  lastFuelType        String?
+  lastPricePerLiter   Float?
+  batteryCapacityKwh  Float?
+  // Preserves the user-defined ordering of the garage list.
+  sortOrder           Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  trackers       TrackerItem[]
+  fuelRecords    FuelRecord[]
+  serviceRecords ServiceRecord[]
+  reminders      Reminder[]
+
+  @@index([userId])
+  @@map("vehicles")
+}
+
+// A per-vehicle maintenance tracker (Engine Oil, Battery, …).
+model TrackerItem {
+  id                 String    @id @default(uuid())
+  vehicleId          String
+  vehicle            Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  name               String
+  lastServiceDate    DateTime?
+  lastServiceMileage Float?
+  nextServiceDate    DateTime?
+  nextServiceMileage Float?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([vehicleId])
+  @@map("tracker_items")
+}
+
+// A fuel fill-up / charging session.
+model FuelRecord {
+  id            String   @id @default(uuid())
+  vehicleId     String
+  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date          DateTime
+  liters        Float
+  fuelType      String
+  odometer      Float
+  pricePerLiter Float
+  stationName   String?
+  isFullTank    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([userId])
+  @@map("fuel_records")
+}
+
+// A completed service / repair record.
+model ServiceRecord {
+  id                 String   @id @default(uuid())
+  vehicleId          String
+  vehicle            Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfService      DateTime
+  serviceType        String
+  mileageAtService   Float
+  cost               Float?
+  serviceStation     String?
+  notes              String?
+  nextServiceMileage Float?
+  // Uploaded receipt/attachment: client-facing URL, physical path, original name.
+  attachmentUrl      String?
+  attachmentPath     String?
+  attachmentFileName String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([userId])
+  @@map("service_records")
+}
+
+// A future-service reminder, triggered by elapsed days or mileage.
+model Reminder {
+  id                       String      @id @default(uuid())
+  vehicleId                String
+  vehicle                  Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  userId                   String
+  user                     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceType              String
+  triggerType              TriggerType
+  triggerValue             Float
+  notes                    String?
+  preferredServiceProvider String?
+  isDone                   Boolean     @default(false)
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  @@index([vehicleId])
+  @@index([userId])
+  @@map("reminders")
+}
+
+// A stored document (licence, insurance, registration, …).
+model Document {
+  id           String       @id @default(uuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  documentType DocumentType
+  // Uploaded file: client-facing URL, physical path, original name.
+  fileUrl      String?
+  filePath     String?
+  fileName     String?
+  expiryDate   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([userId])
+  @@map("documents")
+}
+
+// The user's driving licence — one per user (mirrors DriverLicenseModel).
+model DriverLicense {
+  id            String    @id @default(uuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName      String
+  licenseNumber String
+  dateOfBirth   DateTime?
+  licenceClass  String    @default("")
+  address       String    @default("")
+  issuedDate    DateTime?
+  expiryDate    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("driver_licenses")
+}
