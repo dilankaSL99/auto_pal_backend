@@ -23,6 +23,10 @@ npm run db:seed              # optional demo user: demo@autopal.app / password12
 npm run dev                  # http://localhost:4000
 ```
 
+**Interactive API docs (Swagger UI):** http://localhost:4000/docs — click **Authorize**,
+paste an `accessToken` from `/auth/login`, and try any endpoint. Raw spec at
+`/openapi.json`.
+
 Postgres via Docker: `docker run --name autopal-db -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=auto_pal -p 5432:5432 -d postgres:16`
 
 Production: `npm run build && npm start`

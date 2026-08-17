@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { OAuth2Client } from 'google-auth-library';
+import type { UserRole } from '@prisma/client';
 import { prisma } from '../prisma';
 import { googleClientIds } from '../env';
 import { asyncHandler } from '../lib/asyncHandler';
@@ -11,6 +12,7 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from '../lib/jwt';
+import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 
 export const authRouter = Router();
@@ -32,12 +34,16 @@ const refreshSchema = z.object({
 });
 
 // Shape the user object returned to clients (never leak the password hash).
+// `role` is included so clients (e.g. the admin dashboard) can tell whether the
+// account is an admin without probing an admin-only endpoint. This is a UX hint
+// only — every /api/admin route still enforces the role server-side.
 function publicUser(u: {
   id: string;
   email: string;
   displayName: string;
   phoneNumber: string | null;
   profileImageUrl: string | null;
+  role: UserRole;
   createdAt: Date;
 }) {
   return {
@@ -46,6 +52,7 @@ function publicUser(u: {
     displayName: u.displayName,
     phoneNumber: u.phoneNumber,
     profileImageUrl: u.profileImageUrl,
+    role: u.role,
     createdAt: u.createdAt,
   };
 }
@@ -131,6 +138,18 @@ authRouter.post(
     }
 
     res.json({ user: publicUser(user), ...issueTokens(user) });
+  }),
+);
+
+// GET /auth/me — the currently authenticated account. Lets a client re-hydrate
+// its session (and read `role`) after a page reload from a stored token alone.
+authRouter.get(
+  '/me',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) throw ApiError.unauthorized('Account no longer exists');
+    res.json({ user: publicUser(user) });
   }),
 );
 

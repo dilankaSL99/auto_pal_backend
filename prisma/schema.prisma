@@ -27,11 +27,20 @@ enum DocumentType {
   other
 }
 
+// Access tier. `user` is a normal mobile-app account; `admin` additionally
+// reaches the cross-account endpoints under /api/admin that back the manager
+// dashboard. Defaults to `user`, so existing rows stay unprivileged.
+enum UserRole {
+  user
+  admin
+}
+
 // A registered account. Also carries the profile fields the app keeps in
 // UserProfileModel (displayName / phoneNumber / profileImage).
 model User {
   id              String   @id @default(uuid())
   email           String   @unique
+  role            UserRole @default(user)
   // Null for accounts created via Google Sign-In (no local password).
   passwordHash    String?
   // Google subject id, set when the account is linked to Google.
@@ -252,4 +261,25 @@ model DriverLicense {
   updatedAt     DateTime  @updatedAt
 
   @@map("driver_licenses")
+}
+
+// A promotional banner shown in the mobile dashboard's full-width strip.
+// Not user-scoped: these are pushed centrally by an admin from the manager
+// dashboard and broadcast to every app user. Active banners rotate in the app.
+model PromoBanner {
+  id        String   @id @default(uuid())
+  title     String?
+  // Optional deep-link/URL opened when the banner is tapped.
+  linkUrl   String?
+  // Uploaded image: physical path relative to UPLOAD_ROOT, plus original name.
+  imagePath String?
+  imageName String?
+  // Only active banners are returned to the app. Order controls rotation.
+  active    Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, sortOrder])
+  @@map("promo_banners")
 }

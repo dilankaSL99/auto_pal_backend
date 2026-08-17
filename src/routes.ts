@@ -10,6 +10,8 @@ import { remindersRouter } from './modules/reminders';
 import { documentsRouter } from './modules/documents';
 import { licenseRouter } from './modules/license';
 import { backupRouter } from './modules/backup';
+import { adminRouter } from './modules/admin';
+import { bannersRouter, adminBannersRouter } from './modules/banners';
 
 export const apiRouter = Router();
 
@@ -18,6 +20,12 @@ apiRouter.get('/health', (_req, res) => {
 });
 
 apiRouter.use('/auth', authRouter);
+
+// Cross-account admin endpoints (role: admin only).
+apiRouter.use('/admin', adminRouter);
+// Admin-managed promo banners pushed to the mobile dashboard strip.
+apiRouter.use('/admin/banners', adminBannersRouter);
+apiRouter.use('/banners', bannersRouter);
 apiRouter.use('/profile', profileRouter);
 apiRouter.use('/preferences', preferencesRouter);
 
