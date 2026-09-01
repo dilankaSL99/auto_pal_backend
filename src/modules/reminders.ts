@@ -7,6 +7,7 @@ import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { assertVehicleOwned } from '../lib/ownership';
 import { recordTombstone } from '../lib/tombstone';
+import { assertCanAddReminder } from '../lib/quota';
 
 export const remindersRouter = Router();
 remindersRouter.use(authenticate);
@@ -67,6 +68,7 @@ remindersRouter.put(
     if (existing && existing.userId !== req.user!.id) {
       throw ApiError.forbidden('You do not own this reminder');
     }
+    if (!existing) await assertCanAddReminder(req.user!.id);
     const reminder = await prisma.reminder.upsert({
       where: { id: req.params.id },
       create: { id: req.params.id, userId: req.user!.id, ...req.body },

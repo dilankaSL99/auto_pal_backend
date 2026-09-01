@@ -7,6 +7,7 @@ import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { recordTombstone } from '../lib/tombstone';
 import { upload, saveUpload, deleteUpload, streamUpload } from '../lib/upload';
+import { assertCanAddDocument } from '../lib/quota';
 
 export const documentsRouter = Router();
 documentsRouter.use(authenticate);
@@ -60,6 +61,7 @@ documentsRouter.post(
   '/',
   validate({ body: createSchema }),
   asyncHandler(async (req, res) => {
+    await assertCanAddDocument(req.user!.id);
     const document = await prisma.document.create({
       data: { ...req.body, userId: req.user!.id },
     });

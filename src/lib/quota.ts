@@ -33,3 +33,19 @@ export async function assertCanAddTracker(userId: string, vehicleId: string): Pr
   ]);
   assertWithinLimit(count, limitsForTier(tier).maxTrackersPerVehicle, 'trackers per vehicle', tier);
 }
+
+export async function assertCanAddReminder(userId: string): Promise<void> {
+  const [tier, count] = await Promise.all([
+    tierOf(userId),
+    prisma.reminder.count({ where: { userId } }),
+  ]);
+  assertWithinLimit(count, limitsForTier(tier).maxReminders, 'reminders', tier);
+}
+
+export async function assertCanAddDocument(userId: string): Promise<void> {
+  const [tier, count] = await Promise.all([
+    tierOf(userId),
+    prisma.document.count({ where: { userId } }),
+  ]);
+  assertWithinLimit(count, limitsForTier(tier).maxDocuments, 'documents', tier);
+}
