@@ -107,6 +107,50 @@ describe('subscription tier limits', () => {
     expect(afterUpgrade.status).toBe(201);
   });
 
+  it('caps reminders on Free', async () => {
+    const u = await registerUser();
+    phones.push(u.phoneNumber);
+    const v = await request(app)
+      .post('/api/vehicles')
+      .set(auth(u.accessToken))
+      .send(vehicle('TIER-R1'));
+    const vehicleId = v.body.vehicle.id;
+    const cap = TIER_LIMITS.free.maxReminders as number;
+
+    for (let i = 0; i < cap; i++) {
+      const res = await request(app)
+        .put(`/api/reminders/${crypto.randomUUID()}`)
+        .set(auth(u.accessToken))
+        .send({ vehicleId, serviceType: `Service ${i}`, triggerType: 'days', triggerValue: 30 });
+      expect(res.status).toBe(200);
+    }
+    const over = await request(app)
+      .put(`/api/reminders/${crypto.randomUUID()}`)
+      .set(auth(u.accessToken))
+      .send({ vehicleId, serviceType: 'Over', triggerType: 'days', triggerValue: 30 });
+    expect(over.status).toBe(402);
+    expect(over.body.error.code).toBe('UPGRADE_REQUIRED');
+  });
+
+  it('caps documents on Free', async () => {
+    const u = await registerUser();
+    phones.push(u.phoneNumber);
+    const cap = TIER_LIMITS.free.maxDocuments as number;
+
+    for (let i = 0; i < cap; i++) {
+      const res = await request(app)
+        .post('/api/documents')
+        .set(auth(u.accessToken))
+        .send({ title: `Doc ${i}`, documentType: 'insurance' });
+      expect(res.status).toBe(201);
+    }
+    const over = await request(app)
+      .post('/api/documents')
+      .set(auth(u.accessToken))
+      .send({ title: 'Over', documentType: 'insurance' });
+    expect(over.status).toBe(402);
+  });
+
   it('gates backup export/import behind Pro, but leaves /sync free', async () => {
     const u = await registerUser();
     phones.push(u.phoneNumber);
