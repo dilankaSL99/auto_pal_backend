@@ -7,6 +7,7 @@ import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { assertVehicleOwned } from '../lib/ownership';
 import { recordTombstone } from '../lib/tombstone';
+import { assertCanAddTracker } from '../lib/quota';
 
 // mergeParams lets this nested router read :vehicleId from the parent mount.
 export const trackersRouter = Router({ mergeParams: true });
@@ -59,6 +60,7 @@ trackersRouter.post(
   validate({ params: vehicleParam, body: fullSchema }),
   asyncHandler(async (req, res) => {
     await assertVehicleOwned(req.user!.id, req.params.vehicleId);
+    await assertCanAddTracker(req.user!.id, req.params.vehicleId);
     await assertUniqueName(req.params.vehicleId, req.body.name);
     const tracker = await prisma.trackerItem.create({
       data: { ...req.body, vehicleId: req.params.vehicleId },
@@ -80,6 +82,8 @@ trackersRouter.put(
     if (existing && existing.vehicleId !== req.params.vehicleId) {
       throw ApiError.forbidden('Tracker belongs to a different vehicle');
     }
+    // Creating a new tracker (not updating one) counts against the per-vehicle quota.
+    if (!existing) await assertCanAddTracker(req.user!.id, req.params.vehicleId);
     await assertUniqueName(req.params.vehicleId, req.body.name, req.params.id);
     const tracker = await prisma.trackerItem.upsert({
       where: { id: req.params.id },

@@ -1,6 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
-import type { UserRole } from '@prisma/client';
+import type { UserRole, UserTier } from '@prisma/client';
+import { limitsForTier } from '../lib/entitlements';
 import { prisma } from '../prisma';
 import { asyncHandler } from '../lib/asyncHandler';
 import { ApiError } from '../lib/errors';
@@ -58,6 +59,7 @@ function publicUser(u: {
   displayName: string;
   profileImageUrl: string | null;
   role: UserRole;
+  tier: UserTier;
   createdAt: Date;
 }) {
   return {
@@ -66,6 +68,9 @@ function publicUser(u: {
     displayName: u.displayName,
     profileImageUrl: u.profileImageUrl,
     role: u.role,
+    // Subscription tier — a UX hint for the client. Every limit is still
+    // enforced server-side on write, regardless of what the client believes.
+    tier: u.tier,
     createdAt: u.createdAt,
   };
 }
@@ -119,15 +124,45 @@ authRouter.post(
   }),
 );
 
+// Builds the entitlements block the client uses to render paywalls / upgrade
+// CTAs and gate the next add. `limits` is the tier's caps; `usage` is the live
+// count so the app can show "1 of 1 vehicles used".
+async function computeEntitlements(userId: string, tier: UserTier) {
+  const [vehicles, reminders, documents] = await Promise.all([
+    prisma.vehicle.count({ where: { userId } }),
+    prisma.reminder.count({ where: { userId } }),
+    prisma.document.count({ where: { userId } }),
+  ]);
+  return { tier, limits: limitsForTier(tier), usage: { vehicles, reminders, documents } };
+}
+
 // GET /auth/me — the currently authenticated account. Lets a client re-hydrate
-// its session (and read `role`) after a page reload from a stored token alone.
+// its session (and read `role` / `tier`) from a stored token alone.
 authRouter.get(
   '/me',
   authenticate,
   asyncHandler(async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user) throw ApiError.unauthorized('Account no longer exists');
-    res.json({ user: publicUser(user) });
+    res.json({
+      user: publicUser(user),
+      entitlements: await computeEntitlements(user.id, user.tier),
+    });
+  }),
+);
+
+// GET /auth/entitlements — the tier, its limits, and current usage. A focused
+// endpoint the mobile app polls to keep its paywall gating in sync.
+authRouter.get(
+  '/entitlements',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { id: true, tier: true },
+    });
+    if (!user) throw ApiError.unauthorized('Account no longer exists');
+    res.json({ entitlements: await computeEntitlements(user.id, user.tier) });
   }),
 );
 

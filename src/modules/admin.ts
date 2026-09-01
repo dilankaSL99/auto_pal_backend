@@ -155,6 +155,7 @@ const userSelect = {
   displayName: true,
   phoneNumber: true,
   role: true,
+  tier: true,
   createdAt: true,
   updatedAt: true,
   // Counted by Postgres per row; never the underlying records.

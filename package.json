@@ -17,7 +17,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "role:set": "tsx prisma/set-role.ts"
+    "role:set": "tsx prisma/set-role.ts",
+    "tier:set": "tsx prisma/set-tier.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

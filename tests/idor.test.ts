@@ -19,6 +19,12 @@ const vehicleBody = {
 beforeAll(async () => {
   alice = await registerUser();
   bob = await registerUser();
+  // These tests exercise cross-account access, not tier quotas — give both the
+  // Pro tier so the multi-vehicle setup isn't capped by the free vehicle limit.
+  await prisma.user.updateMany({
+    where: { id: { in: [alice.userId, bob.userId] } },
+    data: { tier: 'pro' },
+  });
 });
 
 afterAll(async () => {

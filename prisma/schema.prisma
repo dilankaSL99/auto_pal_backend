@@ -35,6 +35,14 @@ enum UserRole {
   admin
 }
 
+// Subscription tier. Separate from UserRole so admin status is orthogonal to
+// whether an account is on the paid plan. Server-authoritative; the app reads
+// it via /auth/me but never decides access from it.
+enum UserTier {
+  free
+  pro
+}
+
 // A registered account. Also carries the profile fields the app keeps in
 // UserProfileModel (displayName / phoneNumber / profileImage).
 model User {
@@ -42,6 +50,9 @@ model User {
   // Phone number is the account's primary identifier and login credential.
   phoneNumber     String   @unique
   role            UserRole @default(user)
+  // Paid plan. Defaults to free; flipped by the subscription webhook (later
+  // phase) or the role/tier CLI. Drives per-account usage limits.
+  tier            UserTier @default(free)
   passwordHash    String?
   // Bumped to revoke all outstanding refresh tokens (logout-everywhere, and on
   // password change). Refresh tokens embed the value they were issued at; a

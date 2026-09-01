@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../prisma';
 import { asyncHandler } from '../lib/asyncHandler';
 import { authenticate } from '../middleware/authenticate';
+import { requirePro } from '../middleware/requirePro';
 import { validate } from '../middleware/validate';
+import { limitsForTier } from '../lib/entitlements';
 
 export const backupRouter = Router();
 backupRouter.use(authenticate);
@@ -12,6 +14,7 @@ backupRouter.use(authenticate);
 // GET /backup/export — the full data bundle for the current user.
 backupRouter.get(
   '/backup/export',
+  requirePro,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
     const [profile, preferences, vehicles, fuelRecords, serviceRecords, reminders, documents, driverLicense] =
@@ -168,6 +171,7 @@ const importSchema = z.object({
 // unknown vehicle are skipped rather than failing the whole import.
 backupRouter.post(
   '/backup/import',
+  requirePro,
   validate({ body: importSchema }),
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
@@ -185,6 +189,15 @@ backupRouter.post(
         });
       }
 
+      // Plan limits apply to imports too, so a backup can't be used to exceed
+      // the tier's caps. Only *new* rows count; existing rows update freely.
+      const { tier } = (await tx.user.findUnique({
+        where: { id: userId },
+        select: { tier: true },
+      })) ?? { tier: 'free' as const };
+      const limits = limitsForTier(tier);
+      let vehicleCount = await tx.vehicle.count({ where: { userId } });
+
       // IDOR guard: these upserts key on client-supplied primary keys. Before
       // touching any id, confirm it isn't already owned by a *different*
       // account — otherwise a crafted import could overwrite / take over
@@ -200,12 +213,20 @@ backupRouter.post(
           select: { userId: true },
         });
         if (owner && owner.userId !== userId) continue;
+        const isNewVehicle = !owner;
+        // Skip new vehicles that would exceed the tier's vehicle cap.
+        if (isNewVehicle && limits.maxVehicles !== null && vehicleCount >= limits.maxVehicles) {
+          continue;
+        }
         await tx.vehicle.upsert({
           where: { id: vehicle.id },
           create: { ...vehicle, userId, sortOrder: vehicle.sortOrder ?? index },
           update: { ...vehicle, userId },
         });
+        if (isNewVehicle) vehicleCount++;
         vehiclesImported++;
+
+        let trackerCount = await tx.trackerItem.count({ where: { vehicleId: vehicle.id } });
         for (const t of trackers) {
           // A tracker id belonging to another account's vehicle must not be
           // overwritten, so resolve ownership through the parent vehicle.
@@ -214,11 +235,20 @@ backupRouter.post(
             select: { vehicle: { select: { userId: true } } },
           });
           if (existingTracker && existingTracker.vehicle.userId !== userId) continue;
+          const isNewTracker = !existingTracker;
+          if (
+            isNewTracker &&
+            limits.maxTrackersPerVehicle !== null &&
+            trackerCount >= limits.maxTrackersPerVehicle
+          ) {
+            continue;
+          }
           await tx.trackerItem.upsert({
             where: { id: t.id },
             create: { ...t, vehicleId: vehicle.id },
             update: t,
           });
+          if (isNewTracker) trackerCount++;
         }
       }
 

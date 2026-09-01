@@ -6,6 +6,7 @@ import { ApiError } from '../lib/errors';
 import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { recordTombstone } from '../lib/tombstone';
+import { assertCanAddVehicle } from '../lib/quota';
 
 export const vehiclesRouter = Router();
 vehiclesRouter.use(authenticate);
@@ -121,6 +122,7 @@ vehiclesRouter.post(
   '/',
   validate({ body: createSchema }),
   asyncHandler(async (req, res) => {
+    await assertCanAddVehicle(req.user!.id);
     const maxOrder = await prisma.vehicle.aggregate({
       where: { userId: req.user!.id },
       _max: { sortOrder: true },
@@ -151,6 +153,8 @@ vehiclesRouter.put(
     if (existing && existing.userId !== req.user!.id) {
       throw ApiError.forbidden('You do not own this vehicle');
     }
+    // Creating a brand-new vehicle (not updating one) counts against the quota.
+    if (!existing) await assertCanAddVehicle(req.user!.id);
     // New rows go to the end of the garage; existing rows keep their position.
     let sortOrder = existing?.sortOrder;
     if (sortOrder === undefined) {
