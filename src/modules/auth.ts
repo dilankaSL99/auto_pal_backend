@@ -1,9 +1,7 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
-import { OAuth2Client } from 'google-auth-library';
 import type { UserRole } from '@prisma/client';
 import { prisma } from '../prisma';
-import { googleClientIds } from '../env';
 import { asyncHandler } from '../lib/asyncHandler';
 import { ApiError } from '../lib/errors';
 import { hashPassword, verifyPassword } from '../lib/password';
@@ -14,18 +12,35 @@ import {
 } from '../lib/jwt';
 import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
+import { rateLimit } from '../middleware/rateLimit';
+import { env } from '../env';
 
 export const authRouter = Router();
 
+// Strict limiter for credential-handling endpoints (login / register / refresh)
+// to blunt brute-force and credential-stuffing attacks. Keyed per IP. Disabled
+// under test so the suite can hammer these freely.
+const authLimiter: RequestHandler =
+  env.NODE_ENV === 'test'
+    ? (_req, _res, next) => next()
+    : rateLimit({
+        windowMs: 15 * 60_000,
+        max: 20,
+        message: 'Too many attempts. Please wait a few minutes and try again.',
+      });
+
+// Phone number is the primary login credential. Kept permissive on format so
+// international numbers pass through unchanged; uniqueness is enforced by the DB.
+const phoneNumber = z.string().trim().min(5, 'Enter a valid phone number').max(40);
+
 const registerSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  phoneNumber,
   password: z.string().min(8, 'Password must be at least 8 characters'),
   displayName: z.string().trim().min(1).max(80),
-  phoneNumber: z.string().trim().max(40).optional(),
 });
 
 const loginSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  phoneNumber,
   password: z.string().min(1),
 });
 
@@ -39,47 +54,45 @@ const refreshSchema = z.object({
 // only — every /api/admin route still enforces the role server-side.
 function publicUser(u: {
   id: string;
-  email: string;
+  phoneNumber: string;
   displayName: string;
-  phoneNumber: string | null;
   profileImageUrl: string | null;
   role: UserRole;
   createdAt: Date;
 }) {
   return {
     id: u.id,
-    email: u.email,
-    displayName: u.displayName,
     phoneNumber: u.phoneNumber,
+    displayName: u.displayName,
     profileImageUrl: u.profileImageUrl,
     role: u.role,
     createdAt: u.createdAt,
   };
 }
 
-function issueTokens(user: { id: string; email: string }) {
+function issueTokens(user: { id: string; phoneNumber: string; tokenVersion: number }) {
   return {
-    accessToken: signAccessToken({ sub: user.id, email: user.email }),
-    refreshToken: signRefreshToken(user.id),
+    accessToken: signAccessToken({ sub: user.id, phoneNumber: user.phoneNumber }),
+    refreshToken: signRefreshToken(user.id, user.tokenVersion),
   };
 }
 
 // POST /auth/register
 authRouter.post(
   '/register',
+  authLimiter,
   validate({ body: registerSchema }),
   asyncHandler(async (req, res) => {
-    const { email, password, displayName, phoneNumber } = req.body;
+    const { phoneNumber, password, displayName } = req.body;
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw ApiError.conflict('An account with this email already exists');
+    const existing = await prisma.user.findUnique({ where: { phoneNumber } });
+    if (existing) throw ApiError.conflict('An account with this phone number already exists');
 
     const user = await prisma.user.create({
       data: {
-        email,
+        phoneNumber,
         passwordHash: await hashPassword(password),
         displayName,
-        phoneNumber: phoneNumber ?? null,
       },
     });
 
@@ -90,51 +103,16 @@ authRouter.post(
 // POST /auth/login
 authRouter.post(
   '/login',
+  authLimiter,
   validate({ body: loginSchema }),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
+    const { phoneNumber, password } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { email } });
-    // Same message whether the email or password is wrong (no account enumeration).
-    // `passwordHash` is null for Google-only accounts — treat as no match.
+    const user = await prisma.user.findUnique({ where: { phoneNumber } });
+    // Same message whether the phone number or password is wrong (no account
+    // enumeration). `passwordHash` is null for accounts with no local password.
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
-      throw ApiError.unauthorized('Invalid email or password');
-    }
-
-    res.json({ user: publicUser(user), ...issueTokens(user) });
-  }),
-);
-
-// POST /auth/google — verify a Google ID token and sign in / up.
-const googleSchema = z.object({ idToken: z.string().min(1) });
-const googleClient = new OAuth2Client();
-
-authRouter.post(
-  '/google',
-  validate({ body: googleSchema }),
-  asyncHandler(async (req, res) => {
-    if (googleClientIds.length === 0) {
-      throw new ApiError(503, 'Google sign-in is not configured', 'NOT_CONFIGURED');
-    }
-    const ticket = await googleClient
-      .verifyIdToken({ idToken: req.body.idToken, audience: googleClientIds })
-      .catch(() => null);
-    const payload = ticket?.getPayload();
-    if (!payload?.email || !payload.sub) {
-      throw ApiError.unauthorized('Invalid Google token');
-    }
-
-    const email = payload.email.toLowerCase();
-    const googleId = payload.sub;
-    const displayName = payload.name?.trim() || email.split('@')[0];
-
-    // Match by Google id first, then by email (links an existing password
-    // account to Google on first Google sign-in).
-    let user = await prisma.user.findFirst({ where: { OR: [{ googleId }, { email }] } });
-    if (!user) {
-      user = await prisma.user.create({ data: { email, googleId, displayName } });
-    } else if (!user.googleId) {
-      user = await prisma.user.update({ where: { id: user.id }, data: { googleId } });
+      throw ApiError.unauthorized('Invalid phone number or password');
     }
 
     res.json({ user: publicUser(user), ...issueTokens(user) });
@@ -156,12 +134,33 @@ authRouter.get(
 // POST /auth/refresh — exchange a valid refresh token for a new token pair.
 authRouter.post(
   '/refresh',
+  authLimiter,
   validate({ body: refreshSchema }),
   asyncHandler(async (req, res) => {
-    const { sub } = verifyRefreshToken(req.body.refreshToken);
+    const { sub, tokenVersion } = verifyRefreshToken(req.body.refreshToken);
     const user = await prisma.user.findUnique({ where: { id: sub } });
     if (!user) throw ApiError.unauthorized('Account no longer exists');
+    // Revocation check: a bumped tokenVersion (logout / password change)
+    // invalidates every refresh token issued before the bump.
+    if (user.tokenVersion !== tokenVersion) {
+      throw ApiError.unauthorized('This session has been signed out');
+    }
 
     res.json(issueTokens(user));
+  }),
+);
+
+// POST /auth/logout — server-side sign-out. Bumps the token version so all
+// outstanding refresh tokens for this account stop working immediately. Access
+// tokens (15 min) are stateless and expire on their own.
+authRouter.post(
+  '/logout',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    await prisma.user.update({
+      where: { id: req.user!.id },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    res.json({ ok: true });
   }),
 );

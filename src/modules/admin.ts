@@ -146,13 +146,12 @@ const usersQuery = z.object({
   // Hard ceiling — the page size is the client's, but the limit is ours.
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
   q: z.string().trim().max(120).optional(),
-  sort: z.enum(['createdAt', 'email', 'displayName']).optional().default('createdAt'),
+  sort: z.enum(['createdAt', 'phoneNumber', 'displayName']).optional().default('createdAt'),
   order: z.enum(['asc', 'desc']).optional().default('desc'),
 });
 
 const userSelect = {
   id: true,
-  email: true,
   displayName: true,
   phoneNumber: true,
   role: true,
@@ -184,7 +183,7 @@ adminRouter.get(
     const where = q
       ? {
           OR: [
-            { email: { contains: q, mode: 'insensitive' as const } },
+            { phoneNumber: { contains: q, mode: 'insensitive' as const } },
             { displayName: { contains: q, mode: 'insensitive' as const } },
           ],
         }
@@ -358,7 +357,7 @@ adminRouter.get(
             lastFuelType: true,
             lastPricePerLiter: true,
             createdAt: true,
-            user: { select: { id: true, email: true, displayName: true } },
+            user: { select: { id: true, phoneNumber: true, displayName: true } },
           },
         }),
         // Platform-wide breakdowns (unfiltered) — cheap groupings, not row streams.
@@ -429,7 +428,7 @@ adminRouter.get(
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: req.params.id },
       include: {
-        user: { select: { id: true, email: true, displayName: true } },
+        user: { select: { id: true, phoneNumber: true, displayName: true } },
         trackers: {
           orderBy: { name: 'asc' },
           select: {
@@ -735,7 +734,7 @@ adminRouter.get(
           isDone: true,
           createdAt: true,
           vehicle: { select: { id: true, make: true, model: true, licensePlate: true } },
-          user: { select: { id: true, email: true, displayName: true } },
+          user: { select: { id: true, phoneNumber: true, displayName: true } },
         },
       }),
       prisma.reminder.groupBy({ by: ['serviceType'], _count: { _all: true } }),
@@ -822,7 +821,7 @@ adminRouter.get(
       where: { id: req.params.id },
       include: {
         vehicle: { select: { id: true, make: true, model: true, licensePlate: true } },
-        user: { select: { id: true, email: true, displayName: true } },
+        user: { select: { id: true, phoneNumber: true, displayName: true } },
       },
     });
     if (!record) throw ApiError.notFound('Fuel record not found');
@@ -841,7 +840,7 @@ adminRouter.get(
       where: { id: req.params.id },
       include: {
         vehicle: { select: { id: true, make: true, model: true, licensePlate: true } },
-        user: { select: { id: true, email: true, displayName: true } },
+        user: { select: { id: true, phoneNumber: true, displayName: true } },
       },
     });
     if (!record) throw ApiError.notFound('Service record not found');
@@ -902,7 +901,7 @@ adminRouter.get(
               model: true,
               licensePlate: true,
               currentMileage: true,
-              user: { select: { id: true, email: true, displayName: true } },
+              user: { select: { id: true, phoneNumber: true, displayName: true } },
             },
           },
         },

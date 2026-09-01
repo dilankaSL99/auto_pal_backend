@@ -6,6 +6,7 @@ import { ApiError } from '../lib/errors';
 import { authenticate } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { hashPassword, verifyPassword } from '../lib/password';
+import { signAccessToken, signRefreshToken } from '../lib/jwt';
 import { upload, saveUpload, deleteUpload, streamUpload } from '../lib/upload';
 
 export const profileRouter = Router();
@@ -13,7 +14,6 @@ profileRouter.use(authenticate);
 
 const select = {
   id: true,
-  email: true,
   displayName: true,
   phoneNumber: true,
   profileImageUrl: true,
@@ -24,7 +24,8 @@ const select = {
 const updateSchema = z
   .object({
     displayName: z.string().trim().min(1).max(80).optional(),
-    phoneNumber: z.string().trim().max(40).nullable().optional(),
+    // Phone number is the login credential — it can be changed but not cleared.
+    phoneNumber: z.string().trim().min(5).max(40).optional(),
   })
   .strict();
 
@@ -43,6 +44,15 @@ profileRouter.put(
   '/',
   validate({ body: updateSchema }),
   asyncHandler(async (req, res) => {
+    // Guard the unique phone number so a clash returns a clean 409 rather than
+    // bubbling up Prisma's raw unique-constraint error as a 500.
+    if (req.body.phoneNumber) {
+      const clash = await prisma.user.findFirst({
+        where: { phoneNumber: req.body.phoneNumber, NOT: { id: req.user!.id } },
+        select: { id: true },
+      });
+      if (clash) throw ApiError.conflict('An account with this phone number already exists');
+    }
     const user = await prisma.user.update({
       where: { id: req.user!.id },
       data: req.body,
@@ -86,11 +96,23 @@ profileRouter.patch(
       if (!ok) throw ApiError.unauthorized('Current password is incorrect');
     }
 
-    await prisma.user.update({
+    // Bump tokenVersion so a password change revokes every other outstanding
+    // refresh token (e.g. a session on a lost/stolen device). Return a fresh
+    // token pair carrying the new version so the *current* session stays signed
+    // in instead of being logged out on its next refresh.
+    const updated = await prisma.user.update({
       where: { id: req.user!.id },
-      data: { passwordHash: await hashPassword(req.body.newPassword) },
+      data: {
+        passwordHash: await hashPassword(req.body.newPassword),
+        tokenVersion: { increment: 1 },
+      },
+      select: { id: true, phoneNumber: true, tokenVersion: true },
     });
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      accessToken: signAccessToken({ sub: updated.id, phoneNumber: updated.phoneNumber }),
+      refreshToken: signRefreshToken(updated.id, updated.tokenVersion),
+    });
   }),
 );
 

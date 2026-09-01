@@ -10,6 +10,6 @@ export function authenticate(req: Request, _res: Response, next: NextFunction) {
   }
   const token = header.slice('Bearer '.length).trim();
   const payload = verifyAccessToken(token);
-  req.user = { id: payload.sub, email: payload.email };
+  req.user = { id: payload.sub, phoneNumber: payload.phoneNumber };
   next();
 }

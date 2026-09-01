@@ -17,15 +17,15 @@ const DEFAULT_TRACKERS = [
 ];
 
 // Creates a demo account you can log in with:
-//   email: demo@autopal.app   password: password123
+//   phone: +10000000000   password: password123
 async function main() {
-  const email = 'demo@autopal.app';
+  const phoneNumber = '+10000000000';
   const passwordHash = await bcrypt.hash('password123', 12);
 
   const user = await prisma.user.upsert({
-    where: { email },
+    where: { phoneNumber },
     update: {},
-    create: { email, passwordHash, displayName: 'Demo Driver' },
+    create: { phoneNumber, passwordHash, displayName: 'Demo Driver' },
   });
 
   const existing = await prisma.vehicle.findFirst({ where: { userId: user.id } });
@@ -85,7 +85,7 @@ async function main() {
   }
 
   // eslint-disable-next-line no-console
-  console.log(`Seeded demo user: ${email} / password123`);
+  console.log(`Seeded demo user: ${phoneNumber} / password123`);
 }
 
 main()

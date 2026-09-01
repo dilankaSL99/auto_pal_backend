@@ -39,14 +39,15 @@ enum UserRole {
 // UserProfileModel (displayName / phoneNumber / profileImage).
 model User {
   id              String   @id @default(uuid())
-  email           String   @unique
+  // Phone number is the account's primary identifier and login credential.
+  phoneNumber     String   @unique
   role            UserRole @default(user)
-  // Null for accounts created via Google Sign-In (no local password).
   passwordHash    String?
-  // Google subject id, set when the account is linked to Google.
-  googleId        String?  @unique
+  // Bumped to revoke all outstanding refresh tokens (logout-everywhere, and on
+  // password change). Refresh tokens embed the value they were issued at; a
+  // mismatch on /auth/refresh means the token has been revoked.
+  tokenVersion    Int      @default(0)
   displayName     String
-  phoneNumber     String?
   // Client-facing download URL of the avatar, and its physical path on disk.
   profileImageUrl String?
   profileImagePath String?

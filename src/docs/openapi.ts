@@ -22,9 +22,8 @@ const schemas = {
     type: 'object',
     properties: {
       id: { type: 'string', format: 'uuid' },
-      email: { type: 'string', format: 'email' },
       displayName: { type: 'string' },
-      phoneNumber: { type: 'string', nullable: true },
+      phoneNumber: { type: 'string' },
       profileImageUrl: { type: 'string', nullable: true },
       createdAt: { type: 'string', format: 'date-time' },
     },
@@ -274,12 +273,11 @@ export const openApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['email', 'password', 'displayName'],
+                required: ['phoneNumber', 'password', 'displayName'],
                 properties: {
-                  email: { type: 'string', format: 'email' },
+                  phoneNumber: { type: 'string' },
                   password: { type: 'string', minLength: 8 },
                   displayName: { type: 'string' },
-                  phoneNumber: { type: 'string' },
                 },
               },
             },
@@ -291,7 +289,7 @@ export const openApiSpec = {
     '/auth/login': {
       post: {
         tags: ['Auth'],
-        summary: 'Sign in with email + password',
+        summary: 'Sign in with phone number + password',
         security: [],
         requestBody: {
           required: true,
@@ -299,8 +297,8 @@ export const openApiSpec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['email', 'password'],
-                properties: { email: { type: 'string' }, password: { type: 'string' } },
+                required: ['phoneNumber', 'password'],
+                properties: { phoneNumber: { type: 'string' }, password: { type: 'string' } },
               },
             },
           },
@@ -324,27 +322,11 @@ export const openApiSpec = {
         responses: ok(),
       },
     },
-    '/auth/google': {
-      post: {
-        tags: ['Auth'],
-        summary: 'Sign in / up with a Google ID token',
-        security: [],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { type: 'object', required: ['idToken'], properties: { idToken: { type: 'string' } } },
-            },
-          },
-        },
-        responses: ok('AuthResponse'),
-      },
-    },
 
     // ── Profile ─────────────────────────────────────────────────────────
     '/profile': {
       get: { tags: ['Profile'], summary: 'Read profile', responses: ok() },
-      put: { tags: ['Profile'], summary: 'Update display name / phone', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { displayName: { type: 'string' }, phoneNumber: { type: 'string', nullable: true } } } } } }, responses: ok() },
+      put: { tags: ['Profile'], summary: 'Update display name / phone', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { displayName: { type: 'string' }, phoneNumber: { type: 'string' } } } } } }, responses: ok() },
       delete: { tags: ['Profile'], summary: 'Delete account (cascades)', responses: noContent },
     },
     '/profile/password': {

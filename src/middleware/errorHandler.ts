@@ -38,7 +38,10 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
       message = 'Database request error';
     }
   } else if (err instanceof Error) {
-    message = err.message;
+    // Unhandled/unexpected error. Keep the real message for the logs, but do
+    // not leak internal details (stack traces, SQL, file paths) to the client
+    // in production — respond with a generic 500 message instead.
+    message = env.NODE_ENV === 'production' ? 'Something went wrong' : err.message;
   }
 
   if (status >= 500) {

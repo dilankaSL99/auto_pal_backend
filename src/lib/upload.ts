@@ -3,6 +3,7 @@ import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
 import type { Response } from 'express';
+import { ApiError } from './errors';
 
 // All uploads live under <project>/uploads. Physical paths are stored in the DB
 // *relative* to this root so the data stays portable if the root moves.
@@ -25,9 +26,15 @@ const EXT_MIME: Record<string, string> = {
   '.pdf': 'application/pdf',
 };
 
+// Only allow extensions we know how to serve safely (images + PDF). Anything
+// else — including active types like .html/.svg/.js — is rejected so an
+// attacker can't store content that a browser would execute if it ever reached
+// one of the public/inline file endpoints.
+const ALLOWED_EXTENSIONS = new Set(Object.keys(EXT_MIME));
+
 function safeExt(originalName: string): string {
   const ext = path.extname(originalName).toLowerCase();
-  return /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : '';
+  return ALLOWED_EXTENSIONS.has(ext) ? ext : '';
 }
 
 export interface StoredFile {
@@ -44,6 +51,11 @@ export async function saveUpload(
   file: Express.Multer.File,
 ): Promise<StoredFile> {
   const ext = safeExt(file.originalname);
+  if (!ext) {
+    throw ApiError.badRequest(
+      'Unsupported file type. Allowed types: JPG, PNG, WEBP, GIF, HEIC, PDF.',
+    );
+  }
   const relDir = path.join(userId, category);
   const relativePath = path.join(relDir, `${entityId}${ext}`);
   const absDir = path.join(UPLOAD_ROOT, relDir);

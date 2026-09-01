@@ -4,7 +4,7 @@ REST API for the **Auto Pal** vehicle maintenance app.
 
 - **Runtime:** Node.js + TypeScript · **Framework:** Express
 - **Database:** PostgreSQL via Prisma
-- **Auth:** custom email/password with JWT access + refresh tokens
+- **Auth:** custom phone-number/password with JWT access + refresh tokens
 - **Files:** local disk storage (`uploads/`) via multer
 
 The Prisma schema mirrors the app's local (Hive) models 1:1, and write verbs
@@ -89,7 +89,7 @@ authenticated user.
 # Register → capture the accessToken
 curl -X POST http://localhost:4000/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"email":"me@example.com","password":"password123","displayName":"Me"}'
+  -d '{"phoneNumber":"+15551234567","password":"password123","displayName":"Me"}'
 
 # Create a vehicle at a client-generated UUID
 curl -X PUT http://localhost:4000/api/vehicles/6f9619ff-8b86-d011-b42d-00cf4fc964ff \
@@ -123,7 +123,5 @@ uploads/      user files (git-ignored)
 - **Sync** (`/sync`) returns created/updated rows since a timestamp. Deletions
   are **not** tracked yet; add a tombstone table if the client needs to learn
   about server-side deletes.
-- **Google Sign-In**: add `POST /auth/google` that verifies a Google ID token
-  and issues our JWT pair (the user model is already compatible).
 - **Refresh-token revocation** is stateless; add a `RefreshToken` table for
   server-side logout/blacklisting.

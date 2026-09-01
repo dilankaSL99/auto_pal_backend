@@ -18,7 +18,7 @@ backupRouter.get(
       await Promise.all([
         prisma.user.findUnique({
           where: { id: userId },
-          select: { id: true, email: true, displayName: true, phoneNumber: true, profileImageUrl: true, createdAt: true },
+          select: { id: true, displayName: true, phoneNumber: true, profileImageUrl: true, createdAt: true },
         }),
         prisma.userPreferences.findUnique({ where: { userId } }),
         prisma.vehicle.findMany({
@@ -142,7 +142,8 @@ const importSchema = z.object({
   profile: z
     .object({
       displayName: z.string().optional(),
-      phoneNumber: z.string().nullable().optional(),
+      // Phone number is the login credential — never cleared on import.
+      phoneNumber: z.string().min(5).optional(),
     })
     .optional(),
   preferences: z
@@ -184,15 +185,35 @@ backupRouter.post(
         });
       }
 
+      // IDOR guard: these upserts key on client-supplied primary keys. Before
+      // touching any id, confirm it isn't already owned by a *different*
+      // account — otherwise a crafted import could overwrite / take over
+      // another user's rows just by knowing their UUIDs. Rows owned by someone
+      // else are skipped, exactly like orphaned child rows below.
+
       // Vehicles + their trackers.
+      let vehiclesImported = 0;
       for (const [index, v] of b.vehicles.entries()) {
         const { trackers, ...vehicle } = v;
+        const owner = await tx.vehicle.findUnique({
+          where: { id: vehicle.id },
+          select: { userId: true },
+        });
+        if (owner && owner.userId !== userId) continue;
         await tx.vehicle.upsert({
           where: { id: vehicle.id },
           create: { ...vehicle, userId, sortOrder: vehicle.sortOrder ?? index },
           update: { ...vehicle, userId },
         });
+        vehiclesImported++;
         for (const t of trackers) {
+          // A tracker id belonging to another account's vehicle must not be
+          // overwritten, so resolve ownership through the parent vehicle.
+          const existingTracker = await tx.trackerItem.findUnique({
+            where: { id: t.id },
+            select: { vehicle: { select: { userId: true } } },
+          });
+          if (existingTracker && existingTracker.vehicle.userId !== userId) continue;
           await tx.trackerItem.upsert({
             where: { id: t.id },
             create: { ...t, vehicleId: vehicle.id },
@@ -210,6 +231,8 @@ backupRouter.post(
       let fuel = 0;
       for (const r of b.fuelRecords) {
         if (!owned.has(r.vehicleId)) continue;
+        const owner = await tx.fuelRecord.findUnique({ where: { id: r.id }, select: { userId: true } });
+        if (owner && owner.userId !== userId) continue;
         await tx.fuelRecord.upsert({
           where: { id: r.id },
           create: { ...r, userId },
@@ -221,6 +244,8 @@ backupRouter.post(
       let service = 0;
       for (const r of b.serviceRecords) {
         if (!owned.has(r.vehicleId)) continue;
+        const owner = await tx.serviceRecord.findUnique({ where: { id: r.id }, select: { userId: true } });
+        if (owner && owner.userId !== userId) continue;
         await tx.serviceRecord.upsert({
           where: { id: r.id },
           create: { ...r, userId },
@@ -232,6 +257,8 @@ backupRouter.post(
       let reminders = 0;
       for (const r of b.reminders) {
         if (!owned.has(r.vehicleId)) continue;
+        const owner = await tx.reminder.findUnique({ where: { id: r.id }, select: { userId: true } });
+        if (owner && owner.userId !== userId) continue;
         await tx.reminder.upsert({
           where: { id: r.id },
           create: { ...r, userId },
@@ -240,12 +267,16 @@ backupRouter.post(
         reminders++;
       }
 
+      let documents = 0;
       for (const d of b.documents) {
+        const owner = await tx.document.findUnique({ where: { id: d.id }, select: { userId: true } });
+        if (owner && owner.userId !== userId) continue;
         await tx.document.upsert({
           where: { id: d.id },
           create: { ...d, userId },
           update: { ...d, userId },
         });
+        documents++;
       }
 
       if (b.driverLicense) {
@@ -257,11 +288,11 @@ backupRouter.post(
       }
 
       return {
-        vehicles: b.vehicles.length,
+        vehicles: vehiclesImported,
         fuelRecords: fuel,
         serviceRecords: service,
         reminders,
-        documents: b.documents.length,
+        documents,
       };
     });
 

@@ -14,10 +14,6 @@ const schema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be set'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
-
-  // Comma-separated Google OAuth client IDs accepted as the ID-token audience
-  // (your app's iOS / Android / Web client IDs). Empty disables Google sign-in.
-  GOOGLE_CLIENT_IDS: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -37,7 +33,3 @@ export const corsOrigins =
   env.CORS_ORIGIN === '*'
     ? true
     : env.CORS_ORIGIN.split(',').map((s) => s.trim());
-
-export const googleClientIds = env.GOOGLE_CLIENT_IDS
-  ? env.GOOGLE_CLIENT_IDS.split(',').map((s) => s.trim()).filter(Boolean)
-  : [];
