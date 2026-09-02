@@ -7,9 +7,10 @@ import { ApiError } from './errors';
 // point (create routes, offline sync, backup import) picks it up. `null` means
 // "no limit".
 //
-// NOTE ON DEFAULT TRACKERS: the app auto-seeds 7 default trackers on every new
-// vehicle, so `maxTrackersPerVehicle` for free must stay >= 7 or a free user's
-// first vehicle can't finish setting itself up. 7 == "the defaults, no customs".
+// NOTE ON DEFAULT TRACKERS: the app auto-seeds up to 7 default trackers on a new
+// vehicle. The client trims that seed to `maxTrackersPerVehicle` for the tier
+// (see defaultTrackersFor / AddVehicleViewModel), so a Free vehicle is created
+// with at most this many trackers and never fails to sync.
 
 export interface TierLimits {
   maxVehicles: number | null;
@@ -21,7 +22,7 @@ export interface TierLimits {
 export const TIER_LIMITS: Record<UserTier, TierLimits> = {
   free: {
     maxVehicles: 1,
-    maxTrackersPerVehicle: 7,
+    maxTrackersPerVehicle: 4,
     maxReminders: 3,
     maxDocuments: 3,
   },
